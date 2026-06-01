@@ -1,0 +1,67 @@
+"""
+Shared test fixtures.
+"""
+import os
+import sys
+from contextlib import contextmanager
+
+import pytest
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_PKG_ROOT = os.path.abspath(os.path.join(_HERE, ".."))
+if _PKG_ROOT not in sys.path:
+    sys.path.insert(0, _PKG_ROOT)
+
+
+def _format_param_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    return '"' + str(value).replace('"', '\\"') + '"'
+
+
+def _build_ros_args(params):
+    args = ["--ros-args"]
+    for k, v in params.items():
+        args += ["-p", f"{k}:={_format_param_value(v)}"]
+    return args
+
+
+@pytest.fixture
+def ros_ctx():
+    """
+    Returns a context-manager factory: `with ros_ctx(params) as rclpy: ...`.
+    Initializes rclpy with the given parameter overrides applied globally
+    to every node constructed inside the block, and always shuts down.
+    """
+    rclpy = pytest.importorskip("rclpy")
+    import rclpy.executors  # noqa: F401  (ensures submodule is importable)
+
+    @contextmanager
+    def _ctx(params=None):
+        args = _build_ros_args(params or {})
+        rclpy.init(args=args)
+        try:
+            yield rclpy
+        finally:
+            if rclpy.ok():
+                rclpy.shutdown()
+
+    return _ctx
+
+
+def _spin_until(executor, predicate, timeout=3.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        executor.spin_once(timeout_sec=0.05)
+        if predicate():
+            return True
+    return False
+
+
+@pytest.fixture
+def spin_helper():
+    return _spin_until

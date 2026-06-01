@@ -1,0 +1,24 @@
+version: "3.8"
+services:
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: beer-bot-dev
+    container_name: beer-bot-dev
+    hostname: beer-bot-dev
+    volumes:
+      - ../:/ws
+      - ros_cache:/root/.cache
+    environment:
+      - ROS_DISTRO=humble
+      - ROS_DOMAIN_ID=42
+      - ROS_LOCALHOST_ONLY=1
+      - CYCLONEDDS_URI=file:///ws/docker/cyclonedds.xml
+    stdin_open: true
+    tty: true
+    restart: always
+    command: bash /ws/scripts/start.bash
+    network_mode: host
+volumes:
+  ros_cache:
