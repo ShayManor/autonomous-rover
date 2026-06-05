@@ -17,6 +17,9 @@ RUN apt-get -o Acquire::http::Pipeline-Depth="0" \
       ros-${ROS_DISTRO}-rosbag2-storage-mcap \
       ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
       ros-${ROS_DISTRO}-rclpy ros-${ROS_DISTRO}-ros2bag \
+      ros-${ROS_DISTRO}-rtabmap-ros \
+      ros-${ROS_DISTRO}-cv-bridge \
+      python3-opencv \
       git curl nano && \
     rm -rf /var/lib/apt/lists/*
 

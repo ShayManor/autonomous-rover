@@ -82,3 +82,22 @@ def test_logs_record_events(ros_ctx):
         logs = client.get("/logs").get_json()["logs"]
         assert any("goal" in entry["msg"] for entry in logs)
         node.destroy_node()
+
+
+def test_debug_image_endpoint(ros_ctx):
+    from sensor_msgs.msg import CompressedImage
+
+    with ros_ctx():
+        node, client = _client(ros_ctx)
+        # No frame yet -> 503.
+        assert client.get("/debug_image").status_code == 503
+        # Inject a frame the way the subscription would.
+        msg = CompressedImage()
+        msg.format = "jpeg"
+        msg.data = b"\xff\xd8\xff\xd9"  # minimal JPEG-ish bytes
+        node._on_debug_image(msg)
+        r = client.get("/debug_image")
+        assert r.status_code == 200
+        assert r.content_type == "image/jpeg"
+        assert r.get_data() == b"\xff\xd8\xff\xd9"
+        node.destroy_node()

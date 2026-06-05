@@ -35,6 +35,7 @@ setup(
             'localization_node = beer_bot.nodes.localization.localization_node:main',
             'e_comms_node = beer_bot.nodes.e_comms.e_comms_node:main',
             'master_node = beer_bot.nodes.master.master_node:main',
+            'calibrate_camera = beer_bot.nodes.camera.calibrate_camera:main',
         ],
     },
 )

@@ -1,0 +1,119 @@
+import numpy as np
+import pytest
+
+
+def test_backproject_principal_and_offset_pixels():
+    from beer_bot.nodes.localization.projection import backproject
+
+    K = np.array([[100.0, 0.0, 2.0], [0.0, 100.0, 1.0], [0.0, 0.0, 1.0]])
+    depth = np.full((3, 5), 2.0)
+    xyz = backproject(depth, K)
+    # principal point (cx=2, cy=1) -> (0, 0, z)
+    assert np.allclose(xyz[1, 2], [0.0, 0.0, 2.0])
+    # one pixel right of cx: x = (3-2)*2/100 = 0.02
+    assert np.allclose(xyz[1, 3], [0.02, 0.0, 2.0])
+    # one pixel below cy: y = (2-1)*2/100 = 0.02
+    assert np.allclose(xyz[2, 2], [0.0, 0.02, 2.0])
+
+
+def test_backproject_invalid_depth_is_nan_and_dropped():
+    from beer_bot.nodes.localization.projection import backproject, valid_points
+
+    K = np.array([[100.0, 0.0, 2.0], [0.0, 100.0, 1.0], [0.0, 0.0, 1.0]])
+    depth = np.full((2, 2), 1.0)
+    depth[0, 0] = 0.0      # no return
+    depth[0, 1] = -1.0     # invalid
+    xyz = backproject(depth, K)
+    assert np.isnan(xyz[0, 0]).all()
+    assert np.isnan(xyz[0, 1]).all()
+    pts = valid_points(xyz)
+    assert pts.shape == (2, 3)  # only the two valid pixels survive
+
+
+def _synth_plane(distance, n_pts=800, noise=0.0, seed=0):
+    """Points on the plane y = distance (normal (0,1,0)), x/z spread out."""
+    rng = np.random.default_rng(seed)
+    xz = rng.uniform(-1.0, 1.0, (n_pts, 2))
+    y = np.full((n_pts, 1), distance) + rng.normal(0.0, noise, (n_pts, 1))
+    return np.hstack([xz[:, :1], y, xz[:, 1:]])
+
+
+def test_ground_scale_recovers_known_distance_and_scale():
+    from beer_bot.nodes.localization.ground_plane import ground_scale
+
+    pts = _synth_plane(distance=0.40, noise=0.002)
+    fit = ground_scale(pts, camera_height=0.1524)
+    assert fit is not None
+    assert fit.distance == pytest.approx(0.40, rel=1e-2)
+    assert fit.scale == pytest.approx(0.1524 / 0.40, rel=1e-2)
+    # normal is (approximately) the y axis
+    assert abs(abs(fit.normal[1]) - 1.0) < 1e-2
+
+
+def test_ground_scale_returns_none_on_degenerate_input():
+    from beer_bot.nodes.localization.ground_plane import ground_scale
+
+    assert ground_scale(np.zeros((2, 3)), camera_height=0.1524) is None
+
+
+def _test_K(w=160, h=120, f=120.0):
+    return np.array([[f, 0.0, w / 2.0], [0.0, f, h / 2.0], [0.0, 0.0, 1.0]])
+
+
+def test_stub_depth_is_a_floor_at_camera_height():
+    from beer_bot.nodes.localization.depth import StubDepthEstimator
+    from beer_bot.nodes.localization.projection import backproject, valid_points
+    from beer_bot.nodes.localization.ground_plane import ground_scale
+
+    K = _test_K()
+    height = 0.1524
+    est = StubDepthEstimator(K, camera_height=height, pitch=0.0)
+    depth = est.estimate(np.zeros((120, 160, 3), dtype=np.uint8))
+    assert depth.dtype == np.float32
+    assert depth.shape == (120, 160)
+    assert np.isfinite(depth[depth > 0]).all()
+
+    fit = ground_scale(valid_points(backproject(depth, K)), camera_height=height)
+    assert fit is not None
+    assert fit.distance == pytest.approx(height, rel=1e-2)
+    assert fit.scale == pytest.approx(1.0, rel=1e-2)
+
+
+def test_stub_depth_scale_is_pitch_invariant():
+    from beer_bot.nodes.localization.depth import StubDepthEstimator
+    from beer_bot.nodes.localization.projection import backproject, valid_points
+    from beer_bot.nodes.localization.ground_plane import ground_scale
+
+    K = _test_K()
+    height = 0.1524
+    est = StubDepthEstimator(K, camera_height=height, pitch=0.25)
+    depth = est.estimate(np.zeros((120, 160, 3), dtype=np.uint8))
+    fit = ground_scale(valid_points(backproject(depth, K)), camera_height=height)
+    assert fit is not None
+    assert fit.distance == pytest.approx(height, rel=2e-2)
+
+
+def test_height_inches_zero_on_floor_positive_above():
+    from beer_bot.nodes.localization.depth import StubDepthEstimator
+    from beer_bot.nodes.localization.projection import backproject
+    from beer_bot.nodes.localization.ground_plane import ground_scale
+    from beer_bot.nodes.localization.overlay import height_inches
+
+    K = _test_K()
+    height = 0.1524
+    depth = StubDepthEstimator(K, camera_height=height, pitch=0.0).estimate(
+        np.zeros((120, 160, 3), dtype=np.uint8)
+    )
+    xyz = backproject(depth, K)
+    from beer_bot.nodes.localization.projection import valid_points
+    fit = ground_scale(valid_points(xyz), camera_height=height)
+
+    h_floor = height_inches(xyz, fit.normal, fit.offset)
+    floor = np.isfinite(h_floor)
+    # Floor pixels read ~0 inches above the floor.
+    assert np.nanmax(np.abs(h_floor[floor])) < 0.25
+    # Shifting every point 0.1 m along the plane normal changes height by ~3.94 in
+    # (sign depends on normal orientation, so compare the magnitude of the delta).
+    h_shift = height_inches(xyz + fit.normal * 0.1, fit.normal, fit.offset)
+    delta = np.nanmedian(h_shift[floor] - h_floor[floor])
+    assert abs(delta) == pytest.approx(3.937, abs=0.2)

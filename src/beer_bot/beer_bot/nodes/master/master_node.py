@@ -12,7 +12,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from geometry_msgs.msg import PointStamped, PoseStamped, Twist
 from nav_msgs.msg import Path
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, CompressedImage
 
 from flask import Flask, Response, jsonify, request
 
@@ -83,6 +83,7 @@ class MasterNode(Node):
         self._path = []
         self._cmd = {"v": None, "omega": None}
         self._cloud = None
+        self._debug_image = None
         self._logs = deque(maxlen=log_size)
 
         latched = QoSProfile(depth=1)
@@ -95,6 +96,9 @@ class MasterNode(Node):
         self.create_subscription(Path, "/plan", self._on_path, 10)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd, 10)
         self.create_subscription(PointCloud2, "/cloud_map", self._on_cloud, 10)
+        self.create_subscription(
+            CompressedImage, "/localization/debug_image/compressed", self._on_debug_image, 1
+        )
 
         self._publish_state()  # announce initial idle
         self.app = self._build_app()
@@ -123,6 +127,10 @@ class MasterNode(Node):
     def _on_cloud(self, msg):
         with self._lock:
             self._cloud = msg
+
+    def _on_debug_image(self, msg):
+        with self._lock:
+            self._debug_image = bytes(msg.data)
 
     # --- commands ---------------------------------------------------------
     def _publish_state(self):
@@ -216,6 +224,14 @@ class MasterNode(Node):
         @app.route("/map", methods=["GET"])
         def get_map():
             return jsonify(self.cloud_snapshot())
+
+        @app.route("/debug_image", methods=["GET"])
+        def debug_image():
+            with self._lock:
+                data = self._debug_image
+            if data is None:
+                return jsonify({"error": "no debug image yet"}), 503
+            return Response(data, mimetype="image/jpeg")
 
         @app.route("/logs", methods=["GET"])
         def get_logs():

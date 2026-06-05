@@ -69,3 +69,6 @@ build
 
 # Agent-facing docs (not committed)
 CLAUDE.md
+
+# Local working docs (specs, plans, audits) — never committed
+docs/superpowers/
