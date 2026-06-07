@@ -117,7 +117,7 @@ class ECommsNode(Node):
     def _on_cmd_vel(self, msg):
         self._last_cmd_time = time.monotonic()
         left, right = self.mix(
-            msg.linear.x, msg.angular.z, self.track_width, self.wheel_cmd_per_mps, self.max_wheel_cmd
+            msg.linear.x * -1, msg.angular.z, self.track_width, self.wheel_cmd_per_mps, self.max_wheel_cmd
         )
         self._send({"T": CMD_SPEED_CTRL, "L": left, "R": right})
 
