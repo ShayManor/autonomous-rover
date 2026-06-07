@@ -68,7 +68,10 @@ class CameraNode(Node):
                 target = self.device_path or self.device_index
             else:
                 target = self.video_path
-            cap = cv2.VideoCapture(target)
+            # Force V4L2: OpenCV is built with GStreamer and otherwise auto-picks it
+            # for a device-path string, which can't open a raw webcam ("unable to
+            # start pipeline"). CAP_V4L2 works for both the path and an int index.
+            cap = cv2.VideoCapture(target, cv2.CAP_V4L2) if self.source == "webcam" else cv2.VideoCapture(target)
             if self.source == "webcam":
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
