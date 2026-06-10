@@ -1,3 +1,4 @@
+import os
 import traceback
 
 import numpy as np
@@ -10,7 +11,10 @@ from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 
-from autonomous_rover.nodes.localization.depth import StubDepthEstimator
+from ament_index_python.packages import get_package_share_directory
+from autonomous_rover.nodes.localization.depth import (
+    StubDepthEstimator, OnnxDepthEstimator, parse_qnn_options,
+)
 from autonomous_rover.nodes.localization.projection import backproject, valid_points
 from autonomous_rover.nodes.localization.ground_plane import ground_scale
 from autonomous_rover.nodes.localization import overlay
@@ -53,8 +57,14 @@ class LocalizationNode(Node):
         depth_topic = str(self._param("depth_topic", "/camera/depth"))
         odom_topic = str(self._param("odom_topic", "/odom"))
 
+        self.depth_estimator = str(self._param("depth_estimator", "stub"))
+        self.model_path = self._resolve_model_path(str(self._param("depth_model_path", "")))
+        self.onnx_providers = list(self._param("onnx_providers", ["CPUExecutionProvider"]))
+        self.depth_input_size = int(self._param("depth_input_size", 518))
+        self.qnn_options = parse_qnn_options(list(self._param("qnn_options", [])))
+
         self._bridge = CvBridge() if CvBridge else None
-        self._estimator = None
+        self._estimator = self._build_estimator(None) if self.depth_estimator == "onnx" else None
         self._K = None
 
         self._depth_pub = self.create_publisher(Image, depth_topic, 10)
@@ -76,6 +86,28 @@ class LocalizationNode(Node):
     def _param(self, name, default):
         return self.get_parameter_or(name, Parameter(name, value=default)).value
 
+    def _resolve_model_path(self, path):
+        if not path or os.path.isabs(path):
+            return path
+        try:  # resolve against the installed package share, not the launch cwd
+            share = get_package_share_directory("autonomous_rover")
+            candidate = os.path.join(share, path)
+            if os.path.exists(candidate):
+                return candidate
+        except Exception:
+            pass
+        return path
+
+    def _build_estimator(self, K):
+        if self.depth_estimator == "stub":
+            return StubDepthEstimator(K, self.camera_height, self.pitch)
+        if self.depth_estimator == "onnx":
+            popts = [self.qnn_options if p == "QNNExecutionProvider" else {}
+                     for p in self.onnx_providers]
+            return OnnxDepthEstimator(self.model_path, self.onnx_providers, popts,
+                                      self.depth_input_size)
+        raise ValueError(f"unknown depth_estimator {self.depth_estimator!r}")
+
     def _on_odom(self, msg):
         ps = PoseStamped()
         ps.header = msg.header
@@ -87,9 +119,10 @@ class LocalizationNode(Node):
             return
         K = np.array(info_msg.k, dtype=float).reshape(3, 3)
         rgb = self._bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
-        if self._estimator is None or not np.array_equal(K, self._K):
+        if self._estimator is None or (self.depth_estimator == "stub"
+                                       and not np.array_equal(K, self._K)):
             self._K = K
-            self._estimator = StubDepthEstimator(K, self.camera_height, self.pitch)
+            self._estimator = self._build_estimator(K)
 
         depth = self._estimator.estimate(rgb)
         xyz = backproject(depth, K)
