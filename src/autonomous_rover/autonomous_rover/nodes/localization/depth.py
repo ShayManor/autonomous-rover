@@ -73,3 +73,47 @@ def parse_qnn_options(items):
         k, v = item.split("=", 1)
         out[k.strip()] = v.strip()
     return out
+
+
+def make_session(model_path, providers, provider_options=None,
+                 compile_ctx=False, ctx_path=None):
+    """Build an ORT InferenceSession; optionally dump a QNN context binary.
+
+    onnxruntime is imported lazily so the stub path and CI never need it.
+    """
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(model_path)
+    import onnxruntime as ort
+
+    so = ort.SessionOptions()
+    if compile_ctx:
+        so.add_session_config_entry("ep.context_enable", "1")
+        if ctx_path:
+            so.add_session_config_entry("ep.context_file_path", ctx_path)
+    providers = providers or ["CPUExecutionProvider"]
+    if provider_options is None:
+        provider_options = [{}] * len(providers)
+    return ort.InferenceSession(model_path, sess_options=so,
+                                providers=providers,
+                                provider_options=provider_options)
+
+
+class OnnxDepthEstimator(DepthEstimator):
+    """Depth Anything V2 Metric via ONNX Runtime. estimate(bgr) -> meters @ camera res."""
+
+    def __init__(self, model_path, providers=None, provider_options=None, input_size=518):
+        import cv2  # lazy: only when onnx is selected
+
+        self._cv2 = cv2
+        self._size = int(input_size)
+        self._sess = make_session(model_path, providers, provider_options)
+        self._in = self._sess.get_inputs()[0].name
+
+    def estimate(self, bgr):
+        cv2 = self._cv2
+        pre = preprocess(bgr, self._size,
+                         lambda im, s: cv2.resize(im, s, interpolation=cv2.INTER_CUBIC))
+        raw = self._sess.run(None, {self._in: pre})[0]
+        h, w = bgr.shape[:2]
+        return postprocess(raw, (h, w),
+                           lambda im, s: cv2.resize(im, s, interpolation=cv2.INTER_LINEAR))

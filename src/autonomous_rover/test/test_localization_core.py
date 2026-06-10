@@ -180,3 +180,40 @@ def test_parse_qnn_options():
     assert parse_qnn_options([]) == {}
     # values may contain '=' (split on the first only)
     assert parse_qnn_options(["k=val=extra"]) == {"k": "val=extra"}
+
+
+def test_make_session_missing_model_raises(tmp_path):
+    from autonomous_rover.nodes.localization.depth import make_session
+
+    with pytest.raises(FileNotFoundError):
+        make_session(str(tmp_path / "nope.onnx"), ["CPUExecutionProvider"])
+
+
+def test_onnx_estimator_estimate_with_fake_session(monkeypatch, tmp_path):
+    cv2 = pytest.importorskip("cv2")  # estimate() needs real cv2.resize
+    from autonomous_rover.nodes.localization import depth as depth_mod
+
+    model = tmp_path / "m.onnx"
+    model.write_bytes(b"stub")  # existence check only; session is faked
+
+    class FakeSession:
+        def get_inputs(self):
+            class I:
+                name = "input"
+            return [I()]
+
+        def run(self, _outputs, feeds):
+            x = feeds["input"]
+            assert x.shape == (1, 3, 8, 8)  # input_size honored
+            return [np.full((1, 1, 8, 8), 3.0, dtype=np.float32)]
+
+    monkeypatch.setattr(depth_mod, "make_session",
+                        lambda *a, **k: FakeSession())
+
+    est = depth_mod.OnnxDepthEstimator(str(model), ["CPUExecutionProvider"],
+                                       input_size=8)
+    bgr = np.zeros((5, 7, 3), dtype=np.uint8)
+    out = est.estimate(bgr)
+    assert out.shape == (5, 7)        # resized back to camera resolution
+    assert out.dtype == np.float32
+    assert np.allclose(out, 3.0)      # metric meters passthrough
