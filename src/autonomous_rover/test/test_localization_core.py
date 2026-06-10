@@ -128,3 +128,53 @@ def test_height_inches_zero_on_floor_positive_above():
     h_shift = height_inches(xyz + fit.normal * 0.1, fit.normal, fit.offset)
     delta = np.nanmedian(h_shift[floor] - h_floor[floor])
     assert abs(delta) == pytest.approx(3.937, abs=0.2)
+
+
+def test_preprocess_shape_layout_and_normalization():
+    from autonomous_rover.nodes.localization.depth import preprocess
+
+    # identity "resize" so we control the output size and skip cv2
+    def fake_resize(img, size):
+        w, h = size
+        assert img.shape[:2] == (h, w)  # already at target here
+        return img
+
+    bgr = np.zeros((4, 4, 3), dtype=np.uint8)
+    bgr[..., 0] = 255  # B channel = 255, others 0
+    x = preprocess(bgr, 4, fake_resize)
+
+    assert x.shape == (1, 3, 4, 4)
+    assert x.dtype == np.float32
+    assert x.flags["C_CONTIGUOUS"]
+    # BGR->RGB: R channel (index 0 after transpose) came from bgr[...,2]==0
+    r = (0.0 - 0.485) / 0.229
+    b = (1.0 - 0.406) / 0.225
+    assert np.allclose(x[0, 0], r)   # red plane <- was 0
+    assert np.allclose(x[0, 2], b)   # blue plane <- was 255
+
+
+def test_postprocess_resizes_and_passthrough():
+    from autonomous_rover.nodes.localization.depth import postprocess
+
+    def fake_resize(img, size):
+        w, h = size
+        return np.full((h, w), float(img.flat[0]), dtype=img.dtype)
+
+    raw = np.ones((1, 1, 8, 8), dtype=np.float32) * 2.5
+    out = postprocess(raw, (3, 5), fake_resize)
+    assert out.shape == (3, 5)
+    assert out.dtype == np.float32
+    assert np.allclose(out, 2.5)
+
+    raw2 = np.full((3, 5), 1.0, dtype=np.float32)
+    out2 = postprocess(raw2, (3, 5), fake_resize)  # already target shape -> no resize
+    assert out2.shape == (3, 5)
+    assert np.allclose(out2, 1.0)
+
+
+def test_parse_qnn_options():
+    from autonomous_rover.nodes.localization.depth import parse_qnn_options
+
+    opts = parse_qnn_options(["backend_path=libQnnHtp.so", "htp_arch=68", "", "  "])
+    assert opts == {"backend_path": "libQnnHtp.so", "htp_arch": "68"}
+    assert parse_qnn_options([]) == {}
