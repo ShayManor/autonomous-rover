@@ -73,8 +73,10 @@ CLAUDE.md
 # Local working docs (specs, plans, audits) — never committed
 docs/superpowers/
 
-# Depth net model artifacts (fp32 onnx + compiled QNN context binaries)
-models/
+# Depth net model artifacts: ignore compiled QNN context binaries / scratch,
+# but commit the fp32 source model so the Pi gets it on pull.
+models/*
+!models/depth_anything_v2_metric_indoor_small.onnx
 
 # IDE & tooling artifacts
 .idea/

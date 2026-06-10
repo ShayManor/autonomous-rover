@@ -27,8 +27,9 @@ On the Pi (QCS6490):
 
 1. `pip install onnxruntime-qnn opencv-python` and ensure the QNN libs
    (`libQnnHtp.so`) are on the loader path.
-2. Fetch the fp32 model into `models/` (gitignored):
-   `models/depth_anything_v2_metric_indoor_small.onnx`.
+2. The fp32 model ships in the repo at
+   `models/depth_anything_v2_metric_indoor_small.onnx` (compiled QNN context
+   binaries stay gitignored).
 3. Compile a cached context binary once (runs fp16 on the HTP NPU):
    ```
    ros2 run autonomous_rover compile_depth_qnn \
