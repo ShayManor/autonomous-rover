@@ -11,7 +11,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Compile a QNN context binary (.onnx).")
     ap.add_argument("--model", required=True, help="fp32 source .onnx")
     ap.add_argument("--out", required=True, help="output *_ctx.onnx path")
-    ap.add_argument("--options", nargs="*", default=[],
+    ap.add_argument("--options", nargs="+", default=[],
                     help='QNN provider options as k=v (e.g. backend_path=libQnnHtp.so)')
     args = ap.parse_args(argv)
 
