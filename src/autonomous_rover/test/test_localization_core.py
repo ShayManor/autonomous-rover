@@ -128,3 +128,120 @@ def test_height_inches_zero_on_floor_positive_above():
     h_shift = height_inches(xyz + fit.normal * 0.1, fit.normal, fit.offset)
     delta = np.nanmedian(h_shift[floor] - h_floor[floor])
     assert abs(delta) == pytest.approx(3.937, abs=0.2)
+
+
+def test_preprocess_shape_layout_and_normalization():
+    from autonomous_rover.nodes.localization.depth import preprocess
+
+    # identity "resize" so we control the output size and skip cv2
+    def fake_resize(img, size):
+        w, h = size
+        assert img.shape[:2] == (h, w)  # already at target here
+        return img
+
+    bgr = np.zeros((4, 4, 3), dtype=np.uint8)
+    bgr[..., 0] = 255  # B channel = 255, others 0
+    x = preprocess(bgr, 4, fake_resize)
+
+    assert x.shape == (1, 3, 4, 4)
+    assert x.dtype == np.float32
+    assert x.flags["C_CONTIGUOUS"]
+    # BGR->RGB: R channel (index 0 after transpose) came from bgr[...,2]==0
+    r = (0.0 - 0.485) / 0.229
+    b = (1.0 - 0.406) / 0.225
+    assert np.allclose(x[0, 0], r)   # red plane <- was 0
+    assert np.allclose(x[0, 2], b)   # blue plane <- was 255
+
+
+def test_postprocess_resizes_and_passthrough():
+    from autonomous_rover.nodes.localization.depth import postprocess
+
+    def fake_resize(img, size):
+        w, h = size
+        return np.full((h, w), float(img.flat[0]), dtype=img.dtype)
+
+    raw = np.ones((1, 1, 8, 8), dtype=np.float32) * 2.5
+    out = postprocess(raw, (3, 5), fake_resize)
+    assert out.shape == (3, 5)
+    assert out.dtype == np.float32
+    assert np.allclose(out, 2.5)
+
+    raw2 = np.full((3, 5), 1.0, dtype=np.float32)
+    out2 = postprocess(raw2, (3, 5), fake_resize)  # already target shape -> no resize
+    assert out2.shape == (3, 5)
+    assert np.allclose(out2, 1.0)
+
+
+def test_parse_qnn_options():
+    from autonomous_rover.nodes.localization.depth import parse_qnn_options
+
+    opts = parse_qnn_options(["backend_path=libQnnHtp.so", "htp_arch=68", "", "  "])
+    assert opts == {"backend_path": "libQnnHtp.so", "htp_arch": "68"}
+    assert parse_qnn_options([]) == {}
+    # values may contain '=' (split on the first only)
+    assert parse_qnn_options(["k=val=extra"]) == {"k": "val=extra"}
+
+
+def test_make_session_missing_model_raises(tmp_path):
+    from autonomous_rover.nodes.localization.depth import make_session
+
+    with pytest.raises(FileNotFoundError):
+        make_session(str(tmp_path / "nope.onnx"), ["CPUExecutionProvider"])
+
+
+def test_onnx_estimator_estimate_with_fake_session(monkeypatch, tmp_path):
+    cv2 = pytest.importorskip("cv2")  # estimate() needs real cv2.resize
+    from autonomous_rover.nodes.localization import depth as depth_mod
+
+    model = tmp_path / "m.onnx"
+    model.write_bytes(b"stub")  # existence check only; session is faked
+
+    class FakeSession:
+        def get_inputs(self):
+            class I:
+                name = "input"
+            return [I()]
+
+        def run(self, _outputs, feeds):
+            x = feeds["input"]
+            assert x.shape == (1, 3, 8, 8)  # input_size honored
+            return [np.full((1, 1, 8, 8), 3.0, dtype=np.float32)]
+
+    monkeypatch.setattr(depth_mod, "make_session",
+                        lambda *a, **k: FakeSession())
+
+    est = depth_mod.OnnxDepthEstimator(str(model), ["CPUExecutionProvider"],
+                                       input_size=8)
+    bgr = np.zeros((5, 7, 3), dtype=np.uint8)
+    out = est.estimate(bgr)
+    assert out.shape == (5, 7)        # resized back to camera resolution
+    assert out.dtype == np.float32
+    assert np.allclose(out, 3.0)      # metric meters passthrough
+
+
+def test_compile_qnn_builds_options_and_calls_make_session(monkeypatch, tmp_path):
+    from autonomous_rover.nodes.localization import compile_qnn
+
+    model = tmp_path / "m.onnx"
+    model.write_bytes(b"stub")
+    out = tmp_path / "m_ctx.onnx"
+
+    seen = {}
+
+    def fake_make_session(model_path, providers, provider_options=None,
+                          compile_ctx=False, ctx_path=None):
+        seen.update(model_path=model_path, providers=providers,
+                    provider_options=provider_options,
+                    compile_ctx=compile_ctx, ctx_path=ctx_path)
+        return object()
+
+    monkeypatch.setattr(compile_qnn, "make_session", fake_make_session)
+    compile_qnn.main(["--model", str(model), "--out", str(out),
+                      "--options", "backend_path=libQnnHtp.so", "htp_arch=68"])
+
+    assert seen["model_path"] == str(model)
+    assert seen["providers"] == ["QNNExecutionProvider", "CPUExecutionProvider"]
+    assert seen["provider_options"] == [
+        {"backend_path": "libQnnHtp.so", "htp_arch": "68"}, {}]
+    assert seen["compile_ctx"] is True
+    assert seen["ctx_path"] == str(out)

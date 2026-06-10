@@ -22,3 +22,25 @@ def test_localization_odom_republished_as_pose(ros_ctx, spin_helper):
         assert spin_helper(ex, lambda: len(got) > 0, timeout=2.0)
         assert got[0].pose.position.x == pytest.approx(1.25)
         node.destroy_node()
+
+
+def test_onnx_estimator_unset_model_path_raises_valueerror(ros_ctx):
+    pytest.importorskip("rclpy")
+    from autonomous_rover.nodes.localization.localization_node import LocalizationNode
+
+    with ros_ctx({"depth_estimator": "onnx"}):
+        with pytest.raises(ValueError):
+            LocalizationNode()
+
+
+def test_onnx_estimator_missing_model_hard_fails(ros_ctx):
+    pytest.importorskip("rclpy")
+    from autonomous_rover.nodes.localization.localization_node import LocalizationNode
+
+    params = {
+        "depth_estimator": "onnx",
+        "depth_model_path": "/nonexistent/model.onnx",
+    }
+    with ros_ctx(params):
+        with pytest.raises(FileNotFoundError):
+            LocalizationNode()
