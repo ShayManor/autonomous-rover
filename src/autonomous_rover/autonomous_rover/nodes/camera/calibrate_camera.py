@@ -21,10 +21,15 @@ except ModuleNotFoundError:  # run directly as a script, not as a package module
 
 
 def calibrate(object_points, image_points, image_size):
-    """Wrap cv2.calibrateCamera. Returns (K, D, rms)."""
+    """Wrap cv2.calibrateCamera with a constrained model (k1,k2 only). The C930e
+    has mild barrel distortion; fixing k3 and the tangential terms stops the
+    solver overfitting noise into high-order terms that blow up at frame edges."""
     import cv2
 
-    rms, K, D, _, _ = cv2.calibrateCamera(object_points, image_points, image_size, None, None)
+    flags = cv2.CALIB_FIX_K3 | cv2.CALIB_ZERO_TANGENT_DIST
+    rms, K, D, _, _ = cv2.calibrateCamera(
+        object_points, image_points, image_size, None, None, flags=flags
+    )
     return K, D.flatten(), rms
 
 
