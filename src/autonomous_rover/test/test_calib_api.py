@@ -51,3 +51,29 @@ def test_status_reports_both_flows(tmp_path, monkeypatch):
     mgr, _ = _make_manager(tmp_path, monkeypatch, frame, K)
     st = mgr.status()
     assert "camera" in st and "model" in st
+
+
+def test_calib_status_endpoint(ros_ctx):
+    import pytest as _pytest
+    _pytest.importorskip("flask")
+    from autonomous_rover.nodes.master.master_node import MasterNode
+    with ros_ctx():
+        node = MasterNode()
+        client = node.app.test_client()
+        r = client.get("/calib/status")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert "camera" in body and "model" in body
+        node.destroy_node()
+
+
+def test_calib_camera_capture_requires_start(ros_ctx):
+    import pytest as _pytest
+    _pytest.importorskip("flask")
+    from autonomous_rover.nodes.master.master_node import MasterNode
+    with ros_ctx():
+        node = MasterNode()
+        client = node.app.test_client()
+        r = client.post("/calib/camera/capture")
+        assert r.status_code == 400
+        node.destroy_node()
