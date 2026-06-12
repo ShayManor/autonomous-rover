@@ -46,7 +46,8 @@ class CameraCalibSession:
             raise ValueError("need >= 3 captured views")
         K, D, rms = calibrate(self.obj_points, self.img_points, self.size)
         self.result = {"K": K.tolist(), "D": np.asarray(D).flatten().tolist(),
-                       "rms": float(rms), "width": self.size[0], "height": self.size[1]}
+                       "rms": float(rms), "width": self.size[0], "height": self.size[1],
+                       "views": len(self.img_points)}
         return self.result
 
     def reset(self):

@@ -387,8 +387,10 @@ document.querySelectorAll('.snode').forEach(n=>{
 });
 
 /* ---- tabs ---- */
+let calCamFrozen=false;
 document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   const v=t.dataset.view;
+  calCamFrozen=false;
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('cur',x===t));
   document.querySelectorAll('.view').forEach(x=>x.classList.toggle('cur',x.id===v));
 }));
@@ -396,22 +398,27 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
 /* ---- calibration ---- */
 function banner(id,msg,ok){const el=$('#'+id); el.style.display=''; el.textContent=msg;
   el.classList.toggle('ok',ok===true); el.classList.toggle('err',ok===false);}
-async function calPost(path){const r=await j(path,{}); return r.json().then(b=>({s:r.status,b}));}
+async function calPost(path,body){const r=await j(path,body||{}); return r.json().then(b=>({s:r.status,b}));}
 const CAL={
-  'cam-start':async()=>{await j('/calib/camera/start',
+  'cam-start':async()=>{calCamFrozen=false;
+    const {s,b}=await calPost('/calib/camera/start',
       {rows:+$('#calRows').value,cols:+$('#calCols').value,square:+$('#calSq').value,views:15});
-    banner('calCamBanner','started',true);},
-  'cam-capture':async()=>{const {b}=await calPost('/calib/camera/capture');
-    banner('calCamBanner',b.found?('view '+b.views+' captured'):'board not found',b.found!==false);},
+    banner('calCamBanner', s===200?'started — capture board views':b.error, s===200);},
+  'cam-capture':async()=>{calCamFrozen=false; const {b}=await calPost('/calib/camera/capture');
+    if(b.found){$('#calCamRead').innerHTML='views <b>'+b.views+'</b> · rms —';
+      banner('calCamBanner','view '+b.views+' captured',true);}
+    else banner('calCamBanner','board not found',false);},
   'cam-solve':async()=>{const {b,s}=await calPost('/calib/camera/solve');
     if(s!==200){banner('calCamBanner',b.error,false);return;}
-    $('#calCamRead').innerHTML='views <b>'+b.K.length+'</b> · rms <b>'+b.rms.toFixed(3)+'</b> px';
+    $('#calCamRead').innerHTML='views <b>'+b.views+'</b> · rms <b>'+b.rms.toFixed(3)+'</b> px';
     banner('calCamBanner','solved — Verify or Apply',true);},
-  'cam-verify':async()=>{$('#calCamFrame').src='/calib/camera/undistort?t='+Date.now();
-    banner('calCamBanner','undistorted preview — straight lines = good',true);},
+  'cam-verify':async()=>{calCamFrozen=true; const img=$('#calCamFrame');
+    img.onload=()=>{img.onload=img.onerror=null; banner('calCamBanner','undistorted preview — straight lines = good',true);};
+    img.onerror=()=>{img.onload=img.onerror=null; calCamFrozen=false; banner('calCamBanner','solve the camera calibration first',false);};
+    img.src='/calib/camera/undistort?t='+Date.now();},
   'cam-apply':async()=>{const {b,s}=await calPost('/calib/camera/apply');
     banner('calCamBanner', s!==200?b.error:(b.pushed?'applied + pushed':'applied (push failed: '+b.push_output+')'), s===200&&b.pushed);},
-  'cam-reset':async()=>{await calPost('/calib/camera/reset'); $('#calCamRead').textContent='views — · rms —'; banner('calCamBanner','reset',true);},
+  'cam-reset':async()=>{calCamFrozen=false; await calPost('/calib/camera/reset'); $('#calCamRead').textContent='views — · rms —'; banner('calCamBanner','reset',true);},
   'mod-start':async()=>{const {b,s}=await calPost('/calib/model/start');
     banner('calModBanner', s!==200?b.error:'started — capture floor views', s===200);},
   'mod-capture':async()=>{const {b}=await calPost('/calib/model/capture');
@@ -431,10 +438,10 @@ const CAL={
 };
 document.querySelectorAll('[data-act]').forEach(btn=>btn.addEventListener('click',
   ()=>{const fn=CAL[btn.dataset.act]; if(fn) fn().catch(e=>banner(btn.dataset.act.startsWith('cam')?'calCamBanner':'calModBanner','error: '+e,false));}));
-/* live camera frame in both calibration cards */
+/* live camera frame in both calibration cards (camera card freezes during undistort preview) */
 setInterval(()=>{ if($('#calibration').classList.contains('cur')){
-  $('#calCamFrame').src='/camera_image?t='+Date.now();
-  if(!$('#calModFrame').src.includes('probe')) $('#calModFrame').src='/camera_image?t='+Date.now();
+  if(!calCamFrozen) $('#calCamFrame').src='/camera_image?t='+Date.now();
+  $('#calModFrame').src='/camera_image?t='+Date.now();
 }},1500);
 
 /* ---- telemetry poll ---- */
