@@ -18,6 +18,11 @@ from sensor_msgs.msg import PointCloud2, CompressedImage, CameraInfo, Image
 
 from flask import Flask, Response, jsonify, request
 
+try:
+    from cv_bridge import CvBridge
+except ImportError:  # allow import/construction without cv_bridge
+    CvBridge = None
+
 from autonomous_rover.nodes.master.web import INDEX_HTML
 from autonomous_rover.nodes.master.calibration.manager import CalibrationManager
 
@@ -121,6 +126,7 @@ class MasterNode(Node):
         self._cloud_frame = None
         self._debug_image = None
         self._camera_image = None
+        self._bridge = CvBridge() if CvBridge else None
         self._raw_frame = None       # latest full-res BGR ndarray (for calibration)
         self._caminfo_K = None       # (K ndarray, width, height)
         self.camera_height = float(self._param("camera_height_m", 0.1905))
@@ -407,7 +413,7 @@ class MasterNode(Node):
         def _calib_call(fn):
             try:
                 return jsonify(fn())
-            except ValueError as e:
+            except (ValueError, FileNotFoundError, OSError) as e:
                 return jsonify({"error": str(e)}), 400
 
         @app.route("/calib/status", methods=["GET"])
