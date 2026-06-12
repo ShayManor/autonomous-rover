@@ -77,6 +77,21 @@ class CalibrationManager:
         self.camera = None
         return {"reset": True}
 
+    def camera_undistort_jpeg(self):
+        import cv2
+        if self.camera is None or self.camera.result is None:
+            raise ValueError("solve the camera calibration first")
+        frame = self._get_frame()
+        if frame is None:
+            raise ValueError("no camera frame yet")
+        r = self.camera.result
+        K, D = np.array(r["K"]), np.array(r["D"])
+        und = cv2.undistort(frame, K, D)
+        ok, buf = cv2.imencode(".jpg", und)
+        if not ok:
+            raise ValueError("encode failed")
+        return buf.tobytes()
+
     # --- model flow -------------------------------------------------------
     def model_start(self):
         kinfo = self._get_K()

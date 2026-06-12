@@ -443,6 +443,13 @@ class MasterNode(Node):
         def calib_camera_reset():
             return _calib_call(self._calib.camera_reset)
 
+        @app.route("/calib/camera/undistort", methods=["GET"])
+        def calib_camera_undistort():
+            try:
+                return Response(self._calib.camera_undistort_jpeg(), mimetype="image/jpeg")
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+
         @app.route("/calib/model/start", methods=["POST"])
         def calib_model_start():
             return _calib_call(self._calib.model_start)
